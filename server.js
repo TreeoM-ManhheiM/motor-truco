@@ -12,9 +12,10 @@ const io = new Server(server, {
 
 // --- Configurações do Truco Paulista ---
 const NAIPES = ['paus', 'copas', 'espadas', 'ouros'];
-const VALORES = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3']; // Ordem cíclica para definir manilha
-const ORDEM_FORCA = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3']; // Ordem real da menor para a maior
+const VALORES = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'];
 const PONTOS_PARA_VENCER = 12;
+const PONTOS_INICIAIS_MAO = 1;
+const PONTOS_TRUCO = [3, 6, 9, 12]; // Valores após cada pedido aceito
 
 let salas = {};
 
@@ -44,20 +45,19 @@ function definirManilhas(vira) {
 }
 
 // Compara duas cartas. Retorna >0 se carta1 for maior, <0 se menor, 0 se empate.
-function compararCartas(carta1, carta2, manilhas, cartaVirada) {
-    // 1. Verifica se é manilha
+function compararCartas(carta1, carta2, manilhas) {
+    // Verifica se é manilha
     const manilha1 = manilhas.find(m => m.naipe === carta1.naipe && m.valor === carta1.valor);
     const manilha2 = manilhas.find(m => m.naipe === carta2.naipe && m.valor === carta2.valor);
 
     if (manilha1 && !manilha2) return 1;
     if (!manilha1 && manilha2) return -1;
     if (manilha1 && manilha2) {
-        // Ambas são manilhas: compara por naipe (Paus > Copas > Espadas > Ouros)
         const forcaNaipe = { 'paus': 4, 'copas': 3, 'espadas': 2, 'ouros': 1 };
         return forcaNaipe[carta1.naipe] - forcaNaipe[carta2.naipe];
     }
 
-    // 2. Nenhuma é manilha: compara pela ordem de força normal
+    // Nenhuma é manilha
     const forcaCarta = { '3': 10, '2': 9, 'A': 8, 'K': 7, 'J': 6, 'Q': 5, '7': 4, '6': 3, '5': 2, '4': 1 };
     return forcaCarta[carta1.valor] - forcaCarta[carta2.valor];
 }
@@ -65,60 +65,117 @@ function compararCartas(carta1, carta2, manilhas, cartaVirada) {
 function passarVez(salaId) {
     const sala = salas[salaId];
     if (!sala) return;
-    sala.jogadorAtual = (sala.jogadorAtual + 1) % sala.jogadores.length;
-    io.to(salaId).emit('atualizarVez', { jogadorId: sala.jogadores[sala.jogadorAtual].id });
+    // Avança para o próximo jogador na ordem
+    let indiceAtual = sala.ordemJogadores.indexOf(sala.jogadorAtual);
+    let proximoIndice = (indiceAtual + 1) % sala.ordemJogadores.length;
+    sala.jogadorAtual = sala.ordemJogadores[proximoIndice];
+    io.to(salaId).emit('atualizarVez', { jogadorId: sala.jogadorAtual });
 }
 
-function proximaRodada(salaId) {
+function iniciarRodada(salaId) {
     const sala = salas[salaId];
     if (!sala) return;
-    sala.rodada++;
+    sala.rodadaAtual++;
     sala.cartasNaMesa = [];
-    passarVez(salaId);
-    io.to(salaId).emit('novaRodada', { rodada: sala.rodada });
-}
-
-function verificarFimDaMao(salaId) {
-    const sala = salas[salaId];
-    if (!sala) return;
-
-    const vencedorRodada = determinarVencedorRodada(sala);
-    if (vencedorRodada) {
-        sala.placarRodadas[vencedorRodada.equipe]++;
-        if (sala.placarRodadas[vencedorRodada.equipe] >= 2) {
-            // Fim da mão
-            finalizarMao(salaId, vencedorRodada.equipe);
-        } else {
-            proximaRodada(salaId);
-        }
+    // Define quem começa a rodada (geralmente quem ganhou a anterior ou o primeiro da mão)
+    if (sala.rodadaAtual === 1) {
+        sala.jogadorAtual = sala.ordemJogadores[0];
+    } else {
+        // O vencedor da rodada anterior começa (já está armazenado em sala.ultimoVencedorRodada)
+        sala.jogadorAtual = sala.ultimoVencedorRodada || sala.ordemJogadores[0];
     }
+    io.to(salaId).emit('novaRodada', { rodada: sala.rodadaAtual });
+    io.to(salaId).emit('atualizarVez', { jogadorId: sala.jogadorAtual });
 }
 
 function determinarVencedorRodada(sala) {
-    if (sala.cartasNaMesa.length < 2) return null;
-    const [jogada1, jogada2] = sala.cartasNaMesa;
-    const resultado = compararCartas(jogada1.carta, jogada2.carta, sala.manilhas, sala.vira);
-    if (resultado > 0) return { equipe: jogada1.equipe };
-    if (resultado < 0) return { equipe: jogada2.equipe };
-    return null; // Empate (aguarda a próxima carta)
+    // Agrupa cartas por equipe e pega a maior de cada equipe
+    let cartasPorEquipe = { 'A': [], 'B': [] };
+    sala.cartasNaMesa.forEach(jogada => {
+        cartasPorEquipe[jogada.equipe].push(jogada);
+    });
+    // Para cada equipe, encontra a carta mais forte jogada
+    let melhorPorEquipe = {};
+    for (let eq of ['A', 'B']) {
+        if (cartasPorEquipe[eq].length > 0) {
+            let melhor = cartasPorEquipe[eq][0];
+            for (let i = 1; i < cartasPorEquipe[eq].length; i++) {
+                if (compararCartas(cartasPorEquipe[eq][i].carta, melhor.carta, sala.manilhas) > 0) {
+                    melhor = cartasPorEquipe[eq][i];
+                }
+            }
+            melhorPorEquipe[eq] = melhor;
+        }
+    }
+    // Compara as melhores cartas das equipes que jogaram
+    if (melhorPorEquipe['A'] && melhorPorEquipe['B']) {
+        let resultado = compararCartas(melhorPorEquipe['A'].carta, melhorPorEquipe['B'].carta, sala.manilhas);
+        if (resultado > 0) return { equipe: 'A', jogadorId: melhorPorEquipe['A'].jogadorId };
+        if (resultado < 0) return { equipe: 'B', jogadorId: melhorPorEquipe['B'].jogadorId };
+        // Empate: ninguém vence a rodada ainda; a próxima carta decide
+        return null;
+    }
+    return null;
+}
+
+function verificarFimDaRodada(salaId) {
+    const sala = salas[salaId];
+    if (!sala) return;
+    
+    // Verifica se todos os jogadores da rodada já jogaram (número de cartas igual ao número de jogadores)
+    if (sala.cartasNaMesa.length === sala.ordemJogadores.length) {
+        let vencedor = determinarVencedorRodada(sala);
+        if (vencedor) {
+            // Equipe venceu a rodada
+            sala.placarRodadas[vencedor.equipe]++;
+            sala.ultimoVencedorRodada = vencedor.jogadorId;
+            
+            io.to(salaId).emit('atualizarPlacarRodadas', {
+                rodadasA: sala.placarRodadas['A'],
+                rodadasB: sala.placarRodadas['B']
+            });
+
+            // Verifica se a mão terminou (2 rodadas vencidas)
+            if (sala.placarRodadas['A'] >= 2 || sala.placarRodadas['B'] >= 2) {
+                finalizarMao(salaId, sala.placarRodadas['A'] >= 2 ? 'A' : 'B');
+            } else {
+                // Inicia próxima rodada
+                iniciarRodada(salaId);
+            }
+        } else {
+            // Empate na rodada: a próxima rodada começa com quem jogou a última carta (regra opcional, mas comum)
+            sala.ultimoVencedorRodada = sala.cartasNaMesa[sala.cartasNaMesa.length - 1].jogadorId;
+            iniciarRodada(salaId);
+        }
+    } else {
+        // Ainda não terminaram de jogar, passa a vez
+        passarVez(salaId);
+    }
 }
 
 function finalizarMao(salaId, equipeVencedora) {
     const sala = salas[salaId];
     if (!sala) return;
-    let pontosGanhos = sala.apostaAtual || 1;
+    
+    let pontosGanhos = sala.apostaAtual;
     sala.pontuacao[equipeVencedora] += pontosGanhos;
     
-    const estado = {
+    io.to(salaId).emit('fimDeMao', {
         pontuacao: sala.pontuacao,
         vencedorMao: equipeVencedora,
         pontosGanhos: pontosGanhos
-    };
-    io.to(salaId).emit('fimDeMao', estado);
+    });
 
     if (sala.pontuacao[equipeVencedora] >= PONTOS_PARA_VENCER) {
         io.to(salaId).emit('fimDeJogo', { vencedor: equipeVencedora, pontuacao: sala.pontuacao });
-        delete salas[salaId];
+        // Resetar sala para lobby
+        sala.estado = 'aguardando';
+        sala.jogadores.forEach(j => j.pronto = false);
+        io.to(salaId).emit('atualizarLobby', {
+            jogadores: sala.jogadores,
+            modo: sala.modo,
+            estado: sala.estado
+        });
     } else {
         iniciarNovaMao(salaId);
     }
@@ -127,29 +184,39 @@ function finalizarMao(salaId, equipeVencedora) {
 function iniciarNovaMao(salaId) {
     const sala = salas[salaId];
     if (!sala) return;
+    
     sala.baralho = criarBaralho();
     sala.vira = sala.baralho.pop();
     sala.manilhas = definirManilhas(sala.vira);
     sala.maos = {};
     sala.jogadores.forEach(jogador => {
-        sala.maos[jogador.id] = [sala.baralho.pop(), sala.baralho.pop(), sala.baralho.pop()];
+        sala.maos[jogador.id] = [
+            sala.baralho.pop(),
+            sala.baralho.pop(),
+            sala.baralho.pop()
+        ];
     });
-    sala.rodada = 1;
+    sala.rodadaAtual = 0;
     sala.cartasNaMesa = [];
-    sala.apostaAtual = 1;
+    sala.apostaAtual = PONTOS_INICIAIS_MAO;
     sala.placarRodadas = { 'A': 0, 'B': 0 };
-    sala.jogadorAtual = 0;
-
+    sala.ultimoVencedorRodada = null;
+    
+    // Define a ordem dos jogadores na mesa (sentido horário a partir do primeiro jogador da lista)
+    // Para 2x2, a ordem natural (índices 0,1,2,3) já coloca parceiros intercalados se entradas forem A, B, A, B.
+    sala.ordemJogadores = sala.jogadores.map(j => j.id);
+    
     sala.jogadores.forEach(jogador => {
         io.to(jogador.id).emit('iniciarMao', {
             cartas: sala.maos[jogador.id],
             vira: sala.vira,
-            manilhas: sala.manilhas,
             pontuacao: sala.pontuacao,
             equipe: jogador.equipe
         });
     });
-    io.to(salaId).emit('atualizarVez', { jogadorId: sala.jogadores[0].id });
+    
+    // Inicia a primeira rodada
+    iniciarRodada(salaId);
 }
 
 // --- Eventos de Socket ---
@@ -165,20 +232,30 @@ io.on('connection', (socket) => {
             salas[nomeSala] = {
                 jogadores: [],
                 espectadores: [],
-                modo: modo || '1x1', // '1x1' ou '2x2'
+                modo: modo || '1x1',
                 estado: 'aguardando',
                 pontuacao: { 'A': 0, 'B': 0 }
             };
         }
         const sala = salas[nomeSala];
+        const capacidade = sala.modo === '2x2' ? 4 : 2;
 
-        if (sala.jogadores.length >= (sala.modo === '2x2' ? 4 : 2)) {
+        if (sala.jogadores.length >= capacidade) {
             socket.emit('erro', 'Esta sala já está cheia!');
             return;
         }
 
-        const equipe = (sala.jogadores.length % 2 === 0) ? 'A' : 'B';
-        sala.jogadores.push({ id: socket.id, nome: apelido, equipe });
+        // Define equipe (alterna A, B, A, B...)
+        const equipe = (sala.jogadores.filter(j => j.equipe === 'A').length <= 
+                        sala.jogadores.filter(j => j.equipe === 'B').length) ? 'A' : 'B';
+        
+        const novoJogador = {
+            id: socket.id,
+            nome: apelido,
+            equipe: equipe,
+            pronto: false
+        };
+        sala.jogadores.push(novoJogador);
         
         io.to(nomeSala).emit('atualizarLobby', {
             jogadores: sala.jogadores,
@@ -186,81 +263,145 @@ io.on('connection', (socket) => {
             estado: sala.estado
         });
 
-        const capacidade = sala.modo === '2x2' ? 4 : 2;
+        // Verifica se a sala está completa
         if (sala.jogadores.length === capacidade) {
+            // Não inicia automaticamente; aguarda todos marcarem pronto
+        }
+    });
+
+    socket.on('marcarPronto', () => {
+        const nomeSala = socket.sala;
+        const sala = salas[nomeSala];
+        if (!sala) return;
+
+        const jogador = sala.jogadores.find(j => j.id === socket.id);
+        if (jogador) jogador.pronto = true;
+
+        io.to(nomeSala).emit('atualizarLobby', {
+            jogadores: sala.jogadores,
+            modo: sala.modo,
+            estado: sala.estado
+        });
+
+        const capacidade = sala.modo === '2x2' ? 4 : 2;
+        const todosProntos = sala.jogadores.length === capacidade && sala.jogadores.every(j => j.pronto);
+        
+        if (todosProntos && sala.estado === 'aguardando') {
             sala.estado = 'jogando';
+            sala.pontuacao = { 'A': 0, 'B': 0 };
             io.to(nomeSala).emit('jogoIniciado');
             iniciarNovaMao(nomeSala);
         }
     });
 
     socket.on('jogarCarta', (carta) => {
-        const sala = salas[socket.sala];
+        const nomeSala = socket.sala;
+        const sala = salas[nomeSala];
         if (!sala || sala.estado !== 'jogando') return;
+
         const jogador = sala.jogadores.find(j => j.id === socket.id);
-        if (!jogador || sala.jogadores[sala.jogadorAtual].id !== socket.id) return;
+        if (!jogador || sala.jogadorAtual !== socket.id) return;
 
-        const cartaNaMao = sala.maos[jogador.id].find(c => c.naipe === carta.naipe && c.valor === carta.valor);
-        if (!cartaNaMao) return;
+        // Verifica se a carta está na mão do jogador
+        const mao = sala.maos[jogador.id];
+        const indexCarta = mao.findIndex(c => c.naipe === carta.naipe && c.valor === carta.valor);
+        if (indexCarta === -1) return;
 
-        sala.maos[jogador.id] = sala.maos[jogador.id].filter(c => !(c.naipe === carta.naipe && c.valor === carta.valor));
-        sala.cartasNaMesa.push({ jogadorId: jogador.id, equipe: jogador.equipe, carta });
+        // Remove a carta da mão
+        mao.splice(indexCarta, 1);
+        
+        // Adiciona à mesa
+        sala.cartasNaMesa.push({
+            jogadorId: jogador.id,
+            equipe: jogador.equipe,
+            carta: carta
+        });
 
-        io.to(socket.sala).emit('cartaJogada', { jogadorId: jogador.id, carta });
+        io.to(nomeSala).emit('cartaJogada', {
+            jogadorId: jogador.id,
+            carta: carta,
+            equipe: jogador.equipe
+        });
 
-        if (sala.cartasNaMesa.length === 2) {
-            verificarFimDaMao(socket.sala);
-        } else {
-            passarVez(socket.sala);
-        }
+        // Verifica se a rodada terminou
+        verificarFimDaRodada(nomeSala);
     });
 
     socket.on('pedirTruco', () => {
-        const sala = salas[socket.sala];
+        const nomeSala = socket.sala;
+        const sala = salas[nomeSala];
         if (!sala || sala.estado !== 'jogando') return;
-        const proximaAposta = (sala.apostaAtual || 1) + 3;
-        if (proximaAposta > 12) return;
 
-        const adversarios = sala.jogadores.filter(j => j.equipe !== sala.jogadores.find(j => j.id === socket.id).equipe);
+        const jogador = sala.jogadores.find(j => j.id === socket.id);
+        if (!jogador) return;
+
+        const indiceAtual = PONTOS_TRUCO.indexOf(sala.apostaAtual);
+        if (indiceAtual === -1) return; // Não está em estado de truco
+
+        const proximoValor = PONTOS_TRUCO[indiceAtual + 1];
+        if (!proximoValor) return; // Já está no máximo (12)
+
+        // Envia pedido para a equipe adversária
+        const adversarios = sala.jogadores.filter(j => j.equipe !== jogador.equipe);
         adversarios.forEach(adv => {
-            io.to(adv.id).emit('trucoPedido', { valor: proximaAposta });
+            io.to(adv.id).emit('trucoPedido', { valor: proximoValor, de: jogador.nome });
         });
     });
 
     socket.on('responderTruco', ({ aceitou }) => {
-        const sala = salas[socket.sala];
-        if (!sala) return;
+        const nomeSala = socket.sala;
+        const sala = salas[nomeSala];
+        if (!sala || sala.estado !== 'jogando') return;
+
+        const jogador = sala.jogadores.find(j => j.id === socket.id);
+        if (!jogador) return;
+
+        // Assume que a resposta é do primeiro adversário que recebeu o pedido
         if (aceitou) {
-            sala.apostaAtual += 3;
-            io.to(socket.sala).emit('trucoAceito', { novaAposta: sala.apostaAtual });
+            const indiceAtual = PONTOS_TRUCO.indexOf(sala.apostaAtual);
+            sala.apostaAtual = PONTOS_TRUCO[indiceAtual + 1];
+            io.to(nomeSala).emit('trucoAceito', { novaAposta: sala.apostaAtual });
         } else {
-            const equipeVencedora = sala.jogadores.find(j => j.id === socket.id).equipe === 'A' ? 'B' : 'A';
-            finalizarMao(socket.sala, equipeVencedora);
+            // Equipe que pediu ganha os pontos atuais (antes do aumento)
+            const equipePediu = jogador.equipe === 'A' ? 'B' : 'A';
+            finalizarMao(nomeSala, equipePediu);
         }
     });
 
     socket.on('desistir', () => {
-        const sala = salas[socket.sala];
+        const nomeSala = socket.sala;
+        const sala = salas[nomeSala];
         if (!sala || sala.estado !== 'jogando') return;
+
         const jogador = sala.jogadores.find(j => j.id === socket.id);
         if (!jogador) return;
+
         const equipeVencedora = jogador.equipe === 'A' ? 'B' : 'A';
-        finalizarMao(socket.sala, equipeVencedora);
+        finalizarMao(nomeSala, equipeVencedora);
     });
 
     socket.on('disconnect', () => {
         const nomeSala = socket.sala;
         if (!nomeSala || !salas[nomeSala]) return;
+
         const sala = salas[nomeSala];
         sala.jogadores = sala.jogadores.filter(j => j.id !== socket.id);
+        
         if (sala.jogadores.length === 0) {
             delete salas[nomeSala];
+            console.log(`Sala ${nomeSala} removida.`);
         } else {
             io.to(nomeSala).emit('atualizarLobby', {
                 jogadores: sala.jogadores,
                 modo: sala.modo,
                 estado: sala.estado
             });
+            // Se estava em jogo, cancela a partida
+            if (sala.estado === 'jogando') {
+                sala.estado = 'aguardando';
+                sala.jogadores.forEach(j => j.pronto = false);
+                io.to(nomeSala).emit('fimDeJogo', { motivo: 'desconexao' });
+            }
         }
     });
 });
