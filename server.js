@@ -71,8 +71,10 @@ function verificarFimRodada(salaId) {
 
     // *** REGRA DE EMPATE CORRIGIDA ***
     if (resultado === 0) {
-        // Empate: ninguém marca ponto, próximo a jogar é quem jogou a última carta
+        // Empate: a rodada não conta para ninguém.
         sala.ultimoVencedorRodada = sala.cartasNaMesa[sala.cartasNaMesa.length - 1].jogadorId;
+        // Se for a primeira rodada, a segunda vira a "primeira" (não muda placar).
+        // Se for a segunda rodada (e alguém já tiver 1 ponto), a terceira decide.
         iniciarRodada(salaId);
         return;
     }
@@ -95,7 +97,6 @@ function iniciarRodada(salaId) {
     sala.rodadaAtual++;
     sala.cartasNaMesa = [];
     
-    // Define quem inicia a rodada
     if (sala.rodadaAtual === 1) {
         sala.jogadorAtual = sala.ordemJogadores[sala.jogadorQueIniciaProximaMao];
     } else {
@@ -118,7 +119,6 @@ function finalizarMao(salaId, equipeVencedora) {
         sala.jogadores.forEach(j => j.pronto = false);
         io.to(salaId).emit('atualizarLobby', { jogadores: sala.jogadores, modo: sala.modo, estado: sala.estado });
     } else {
-        // Alterna o jogador que inicia a próxima mão
         sala.jogadorQueIniciaProximaMao = (sala.jogadorQueIniciaProximaMao + 1) % sala.ordemJogadores.length;
         iniciarNovaMao(salaId);
     }
@@ -138,7 +138,6 @@ function iniciarNovaMao(salaId) {
     sala.ultimoVencedorRodada = null;
     sala.ordemJogadores = sala.jogadores.map(j => j.id);
     sala.truco = { pendente: false, desafiante: null, desafiado: null, valorProposto: 3 };
-    // Inicializa a variável de controle se não existir
     if (sala.jogadorQueIniciaProximaMao === undefined) {
         sala.jogadorQueIniciaProximaMao = 0;
     }
