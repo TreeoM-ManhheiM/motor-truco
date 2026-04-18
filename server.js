@@ -13,7 +13,9 @@ const VALORES = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'];
 const PONTOS_PARA_VENCER = 12;
 const VALORES_APOSTA = [1, 3, 6, 9, 12];
 
+// Força das cartas comuns (base)
 const FORCA_CARTA = { '4':1,'5':2,'6':3,'7':4,'Q':5,'J':6,'K':7,'A':8,'2':9,'3':10 };
+// Força dos naipes (para desempate de manilhas)
 const FORCA_NAIPE = { 'paus':4, 'copas':3, 'espadas':2, 'ouros':1 };
 
 let salas = {};
@@ -31,39 +33,31 @@ function embaralhar(baralho) {
     return baralho;
 }
 
-function getValorManilha(vira) {
-    if (!vira || !vira.valor) return null;
-    let idx = VALORES.indexOf(vira.valor);
-    return VALORES[(idx + 1) % VALORES.length];
+// 🔧 NOVA LÓGICA INFALÍVEL: Cada carta recebe uma pontuação numérica absoluta
+function getForcaCarta(carta, vira) {
+    const valorVira = vira.valor;
+    const idxVira = VALORES.indexOf(valorVira);
+    const valorManilha = VALORES[(idxVira + 1) % VALORES.length];
+    
+    const valorCarta = carta.valor;
+    const naipeCarta = carta.naipe;
+    
+    // Verifica se é manilha
+    if (valorCarta === valorManilha) {
+        // Manilha: força base 100 + força do naipe (garante que manilhas > qualquer comum)
+        return 100 + FORCA_NAIPE[naipeCarta];
+    } else {
+        // Carta comum: força de 1 a 10
+        return FORCA_CARTA[valorCarta];
+    }
 }
 
-function compararCartas(carta1, carta2, valorManilha) {
-    if (!valorManilha) {
-        const f1 = FORCA_CARTA[carta1.valor] || 0;
-        const f2 = FORCA_CARTA[carta2.valor] || 0;
-        return f1 - f2;
-    }
-
-    const v1 = carta1.valor;
-    const v2 = carta2.valor;
-    const n1 = carta1.naipe;
-    const n2 = carta2.naipe;
-
-    const manilha1 = (v1 === valorManilha);
-    const manilha2 = (v2 === valorManilha);
-
-    if (manilha1 && !manilha2) return 1;
-    if (!manilha1 && manilha2) return -1;
-
-    if (manilha1 && manilha2) {
-        return FORCA_NAIPE[n1] - FORCA_NAIPE[n2];
-    }
-
-    const f1 = FORCA_CARTA[v1];
-    const f2 = FORCA_CARTA[v2];
-    if (f1 !== f2) return f1 - f2;
-
-    return 0;
+// Comparação simples: subtrai as forças
+function compararCartas(carta1, carta2, vira) {
+    const f1 = getForcaCarta(carta1, vira);
+    const f2 = getForcaCarta(carta2, vira);
+    console.log(`[DEBUG] Força ${carta1.valor}${carta1.naipe}=${f1} vs ${carta2.valor}${carta2.naipe}=${f2}`);
+    return f1 - f2;
 }
 
 function passarVez(salaId) {
@@ -81,25 +75,22 @@ function verificarFimRodada(salaId) {
         return;
     }
 
-    const valorManilha = getValorManilha(sala.vira);
-    console.log(`[TRUCO] Sala ${salaId} - Rodada ${sala.rodadaAtual} - Vira: ${sala.vira.valor}${sala.vira.naipe} -> Manilha: ${valorManilha}`);
+    console.log(`[TRUCO] Rodada ${sala.rodadaAtual} - Vira: ${sala.vira.valor}${sala.vira.naipe}`);
 
     let melhor = { A: null, B: null };
     sala.cartasNaMesa.forEach(j => {
         let atual = melhor[j.equipe];
-        if (!atual || compararCartas(j.carta, atual.carta, valorManilha) > 0)
+        if (!atual || compararCartas(j.carta, atual.carta, sala.vira) > 0)
             melhor[j.equipe] = j;
     });
 
-    const resultado = compararCartas(melhor.A.carta, melhor.B.carta, valorManilha);
-    console.log(`[TRUCO] Resultado comparação: ${resultado} (${resultado > 0 ? 'A vence' : (resultado < 0 ? 'B vence' : 'Empate')})`);
+    const resultado = compararCartas(melhor.A.carta, melhor.B.carta, sala.vira);
+    console.log(`[TRUCO] Resultado: ${resultado} -> ${resultado > 0 ? 'A vence' : (resultado < 0 ? 'B vence' : 'Empate')}`);
 
-    // Força fim da mão se passou da 3ª rodada (proteção extra)
+    // Força fim da mão se passou da 3ª rodada
     if (sala.rodadaAtual >= 3) {
-        console.log(`[TRUCO] ⚠️ Rodada ${sala.rodadaAtual} excedeu limite! Forçando fim da mão por desempate.`);
-        const nA = melhor.A.carta.naipe;
-        const nB = melhor.B.carta.naipe;
-        const vencedor = FORCA_NAIPE[nA] > FORCA_NAIPE[nB] ? 'A' : 'B';
+        console.log(`[TRUCO] ⚠️ Rodada ${sala.rodadaAtual} excedeu limite! Forçando fim da mão.`);
+        const vencedor = resultado > 0 ? 'A' : (resultado < 0 ? 'B' : (FORCA_NAIPE[melhor.A.carta.naipe] > FORCA_NAIPE[melhor.B.carta.naipe] ? 'A' : 'B'));
         finalizarMao(salaId, vencedor);
         return;
     }
@@ -110,7 +101,7 @@ function verificarFimRodada(salaId) {
             const nA = melhor.A.carta.naipe;
             const nB = melhor.B.carta.naipe;
             const vencedor = FORCA_NAIPE[nA] > FORCA_NAIPE[nB] ? 'A' : 'B';
-            console.log(`[TRUCO] Desempate por naipe (3ª rodada): ${vencedor}`);
+            console.log(`[TRUCO] Desempate 3ª rodada por naipe: ${vencedor}`);
             sala.placarRodadas[vencedor]++;
             sala.ultimoVencedorRodada = melhor[vencedor].jogadorId;
             io.to(salaId).emit('atualizarPlacarRodadas', { rodadasA: sala.placarRodadas.A, rodadasB: sala.placarRodadas.B });
@@ -125,7 +116,7 @@ function verificarFimRodada(salaId) {
     const equipeVencedora = resultado > 0 ? 'A' : 'B';
     sala.placarRodadas[equipeVencedora]++;
     sala.ultimoVencedorRodada = melhor[equipeVencedora].jogadorId;
-    console.log(`[TRUCO] Vencedor da rodada: ${equipeVencedora}. Placar de rodadas: ${sala.placarRodadas.A} x ${sala.placarRodadas.B}`);
+    console.log(`[TRUCO] Vencedor da rodada: ${equipeVencedora}. Placar: ${sala.placarRodadas.A}x${sala.placarRodadas.B}`);
 
     io.to(salaId).emit('atualizarPlacarRodadas', { rodadasA: sala.placarRodadas.A, rodadasB: sala.placarRodadas.B });
 
@@ -162,7 +153,7 @@ function finalizarMao(salaId, equipeVencedora) {
     const sala = salas[salaId];
     let pontos = sala.apostaAtual;
     sala.pontuacao[equipeVencedora] += pontos;
-    console.log(`[TRUCO] 🏆 Fim da mão! Equipe ${equipeVencedora} ganhou ${pontos} ponto(s). Total: ${sala.pontuacao.A} x ${sala.pontuacao.B}`);
+    console.log(`[TRUCO] 🏆 Fim da mão! Equipe ${equipeVencedora} ganhou ${pontos} ponto(s). Total: ${sala.pontuacao.A}x${sala.pontuacao.B}`);
     io.to(salaId).emit('fimDeMao', { pontuacao: sala.pontuacao, vencedorMao: equipeVencedora, pontosGanhos: pontos });
 
     if (sala.pontuacao[equipeVencedora] >= PONTOS_PARA_VENCER) {
