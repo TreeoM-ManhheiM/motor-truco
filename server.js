@@ -18,6 +18,12 @@ const FORCA_CARTA = { '4':1,'5':2,'6':3,'7':4,'Q':5,'J':6,'K':7,'A':8,'2':9,'3':
 // Força dos naipes (para desempate de manilhas)
 const FORCA_NAIPE = { 'paus':4, 'copas':3, 'espadas':2, 'ouros':1 };
 
+// 🔧 MAPA DIRETO VIRA -> MANILHA (INFALÍVEL)
+const MANILHA_POR_VIRA = {
+    '4': '5', '5': '6', '6': '7', '7': 'Q', 'Q': 'J',
+    'J': 'K', 'K': 'A', 'A': '2', '2': '3', '3': '4'
+};
+
 let salas = {};
 
 function criarBaralho() {
@@ -33,26 +39,19 @@ function embaralhar(baralho) {
     return baralho;
 }
 
-// 🔧 NOVA LÓGICA INFALÍVEL: Cada carta recebe uma pontuação numérica absoluta
+// 🎯 FORÇA ABSOLUTA DA CARTA (MANILHA = 100 + FORÇA DO NAIPE)
 function getForcaCarta(carta, vira) {
-    const valorVira = vira.valor;
-    const idxVira = VALORES.indexOf(valorVira);
-    const valorManilha = VALORES[(idxVira + 1) % VALORES.length];
-    
+    const valorManilha = MANILHA_POR_VIRA[vira.valor];
     const valorCarta = carta.valor;
     const naipeCarta = carta.naipe;
     
-    // Verifica se é manilha
     if (valorCarta === valorManilha) {
-        // Manilha: força base 100 + força do naipe (garante que manilhas > qualquer comum)
         return 100 + FORCA_NAIPE[naipeCarta];
     } else {
-        // Carta comum: força de 1 a 10
         return FORCA_CARTA[valorCarta];
     }
 }
 
-// Comparação simples: subtrai as forças
 function compararCartas(carta1, carta2, vira) {
     const f1 = getForcaCarta(carta1, vira);
     const f2 = getForcaCarta(carta2, vira);
