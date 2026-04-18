@@ -82,6 +82,7 @@ function verificarFimRodada(salaId) {
     const resultado = compararCartas(melhor.A.carta, melhor.B.carta, sala.vira);
     console.log(`[TRUCO] Resultado: ${resultado} -> ${resultado > 0 ? 'A vence' : (resultado < 0 ? 'B vence' : 'Empate')}`);
 
+    // Força fim da mão se passou da 3ª rodada
     if (sala.rodadaAtual >= 3) {
         console.log(`[TRUCO] ⚠️ Rodada ${sala.rodadaAtual} excedeu limite! Forçando fim da mão.`);
         const vencedor = resultado > 0 ? 'A' : (resultado < 0 ? 'B' : (FORCA_NAIPE[melhor.A.carta.naipe] > FORCA_NAIPE[melhor.B.carta.naipe] ? 'A' : 'B'));
@@ -188,6 +189,7 @@ function iniciarNovaMao(salaId) {
     io.to(salaId).emit('atualizarAposta', { aposta: 1 });
 }
 
+// ---------- TRUCO (CORRIGIDO) ----------
 function pedirTruco(salaId, socketId) {
     const sala = salas[salaId];
     if (!sala || sala.estado !== 'jogando') return;
@@ -198,7 +200,12 @@ function pedirTruco(salaId, socketId) {
     if (idx === VALORES_APOSTA.length-1) return;
     const proximo = VALORES_APOSTA[idx+1];
     const adversarios = sala.jogadores.filter(j => j.equipe !== jogador.equipe);
-    sala.truco = { pendente: true, desafiante: jogador.equipe, desafiado: adversarios.map(a=>a.id), valorProposto: proximo };
+    sala.truco = {
+        pendente: true,
+        desafiante: jogador.equipe,
+        desafiado: adversarios.map(a => a.id),
+        valorProposto: proximo
+    };
     adversarios.forEach(a => io.to(a.id).emit('trucoPedido', { valor: proximo, de: jogador.nome }));
     io.to(socketId).emit('trucoPedidoEnviado', { valor: proximo });
 }
@@ -208,33 +215,44 @@ function responderTruco(salaId, socketId, aceitou, aumentar) {
     if (!sala || !sala.truco.pendente) return;
     const jogador = sala.jogadores.find(j => j.id === socketId);
     if (!jogador) return;
-    if (jogador.equipe === sala.truco.desafiante) { io.to(socketId).emit('erro', 'Resposta é do adversário'); return; }
-    const desafiante = sala.truco.desafiante;
-    const valor = sala.truco.valorProposto;
+    if (jogador.equipe === sala.truco.desafiante) {
+        io.to(socketId).emit('erro', 'Resposta é do adversário');
+        return;
+    }
+
+    const desafianteEquipe = sala.truco.desafiante;
+    const valorProposto = sala.truco.valorProposto;
 
     if (aceitou) {
-        sala.apostaAtual = valor;
+        // Aceitou: a aposta sobe para o valor proposto e o jogo continua
+        sala.apostaAtual = valorProposto;
         sala.truco = { pendente: false, desafiante: null, desafiado: null, valorProposto: 0 };
-        io.to(salaId).emit('trucoAceito', { novaAposta: valor });
-        io.to(salaId).emit('atualizarAposta', { aposta: valor });
+        io.to(salaId).emit('trucoAceito', { novaAposta: sala.apostaAtual });
+        io.to(salaId).emit('atualizarAposta', { aposta: sala.apostaAtual });
     } else if (aumentar) {
-        const idx = VALORES_APOSTA.indexOf(valor);
-        if (idx === VALORES_APOSTA.length-1) return;
-        const novo = VALORES_APOSTA[idx+1];
+        // Aumentar: primeiro aceita o valor atual, depois propõe um valor maior e inverte o desafiante
+        sala.apostaAtual = valorProposto;   // <-- CORREÇÃO CRÍTICA: aceita o valor atual antes de aumentar
+        const idxAtual = VALORES_APOSTA.indexOf(valorProposto);
+        if (idxAtual === VALORES_APOSTA.length - 1) return; // já está no máximo (12)
+        const novoValor = VALORES_APOSTA[idxAtual + 1];
         const adversarios = sala.jogadores.filter(j => j.equipe !== jogador.equipe);
-        sala.truco = { pendente: true, desafiante: jogador.equipe, desafiado: adversarios.map(a=>a.id), valorProposto: novo };
-        io.to(salaId).emit('trucoAumentado', { de: jogador.nome, valor: novo });
-        adversarios.forEach(a => io.to(a.id).emit('trucoPedido', { valor: novo, de: jogador.nome }));
+        sala.truco = {
+            pendente: true,
+            desafiante: jogador.equipe,       // agora quem respondeu se torna o desafiante
+            desafiado: adversarios.map(a => a.id),
+            valorProposto: novoValor
+        };
+        io.to(salaId).emit('trucoAumentado', { de: jogador.nome, valor: novoValor });
+        io.to(salaId).emit('atualizarAposta', { aposta: sala.apostaAtual });
+        adversarios.forEach(a => io.to(a.id).emit('trucoPedido', { valor: novoValor, de: jogador.nome }));
     } else {
-        // 🟢 CORRER: ganha o valor ANTERIOR da aposta
-        const idxAnterior = VALORES_APOSTA.indexOf(sala.apostaAtual) - 1;
-        const valorAnterior = idxAnterior >= 0 ? VALORES_APOSTA[idxAnterior] : 1;
-        sala.apostaAtual = valorAnterior;
+        // Correr: o desafiante ganha o valor já aceito (sala.apostaAtual)
         sala.truco = { pendente: false, desafiante: null, desafiado: null, valorProposto: 0 };
-        finalizarMao(salaId, desafiante);
+        finalizarMao(salaId, desafianteEquipe);
     }
 }
 
+// ---------- Socket ----------
 io.on('connection', socket => {
     console.log('🃏', socket.id);
     socket.on('entrarSala', ({ apelido, sala: nome, modo }) => {
