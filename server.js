@@ -13,12 +13,9 @@ const VALORES = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'];
 const PONTOS_PARA_VENCER = 12;
 const VALORES_APOSTA = [1, 3, 6, 9, 12];
 
-// Força das cartas comuns (base)
 const FORCA_CARTA = { '4':1,'5':2,'6':3,'7':4,'Q':5,'J':6,'K':7,'A':8,'2':9,'3':10 };
-// Força dos naipes (para desempate de manilhas)
 const FORCA_NAIPE = { 'paus':4, 'copas':3, 'espadas':2, 'ouros':1 };
 
-// 🔧 MAPA DIRETO VIRA -> MANILHA (INFALÍVEL)
 const MANILHA_POR_VIRA = {
     '4': '5', '5': '6', '6': '7', '7': 'Q', 'Q': 'J',
     'J': 'K', 'K': 'A', 'A': '2', '2': '3', '3': '4'
@@ -39,7 +36,6 @@ function embaralhar(baralho) {
     return baralho;
 }
 
-// 🎯 FORÇA ABSOLUTA DA CARTA (MANILHA = 100 + FORÇA DO NAIPE)
 function getForcaCarta(carta, vira) {
     const valorManilha = MANILHA_POR_VIRA[vira.valor];
     const valorCarta = carta.valor;
@@ -86,7 +82,6 @@ function verificarFimRodada(salaId) {
     const resultado = compararCartas(melhor.A.carta, melhor.B.carta, sala.vira);
     console.log(`[TRUCO] Resultado: ${resultado} -> ${resultado > 0 ? 'A vence' : (resultado < 0 ? 'B vence' : 'Empate')}`);
 
-    // Força fim da mão se passou da 3ª rodada
     if (sala.rodadaAtual >= 3) {
         console.log(`[TRUCO] ⚠️ Rodada ${sala.rodadaAtual} excedeu limite! Forçando fim da mão.`);
         const vencedor = resultado > 0 ? 'A' : (resultado < 0 ? 'B' : (FORCA_NAIPE[melhor.A.carta.naipe] > FORCA_NAIPE[melhor.B.carta.naipe] ? 'A' : 'B'));
@@ -193,7 +188,6 @@ function iniciarNovaMao(salaId) {
     io.to(salaId).emit('atualizarAposta', { aposta: 1 });
 }
 
-// ---------- TRUCO ----------
 function pedirTruco(salaId, socketId) {
     const sala = salas[salaId];
     if (!sala || sala.estado !== 'jogando') return;
@@ -235,7 +229,6 @@ function responderTruco(salaId, socketId, aceitou, aumentar) {
     }
 }
 
-// ---------- Socket ----------
 io.on('connection', socket => {
     console.log('🃏', socket.id);
     socket.on('entrarSala', ({ apelido, sala: nome, modo }) => {
