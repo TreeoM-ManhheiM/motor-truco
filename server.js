@@ -202,6 +202,7 @@ function pedirTruco(salaId, socketId) {
     adversarios.forEach(a => io.to(a.id).emit('trucoPedido', { valor: proximo, de: jogador.nome }));
     io.to(socketId).emit('trucoPedidoEnviado', { valor: proximo });
 }
+
 function responderTruco(salaId, socketId, aceitou, aumentar) {
     const sala = salas[salaId];
     if (!sala || !sala.truco.pendente) return;
@@ -210,9 +211,10 @@ function responderTruco(salaId, socketId, aceitou, aumentar) {
     if (jogador.equipe === sala.truco.desafiante) { io.to(socketId).emit('erro', 'Resposta é do adversário'); return; }
     const desafiante = sala.truco.desafiante;
     const valor = sala.truco.valorProposto;
+
     if (aceitou) {
         sala.apostaAtual = valor;
-        sala.truco = { pendente: false };
+        sala.truco = { pendente: false, desafiante: null, desafiado: null, valorProposto: 0 };
         io.to(salaId).emit('trucoAceito', { novaAposta: valor });
         io.to(salaId).emit('atualizarAposta', { aposta: valor });
     } else if (aumentar) {
@@ -224,7 +226,11 @@ function responderTruco(salaId, socketId, aceitou, aumentar) {
         io.to(salaId).emit('trucoAumentado', { de: jogador.nome, valor: novo });
         adversarios.forEach(a => io.to(a.id).emit('trucoPedido', { valor: novo, de: jogador.nome }));
     } else {
-        sala.truco = { pendente: false };
+        // 🟢 CORRER: ganha o valor ANTERIOR da aposta
+        const idxAnterior = VALORES_APOSTA.indexOf(sala.apostaAtual) - 1;
+        const valorAnterior = idxAnterior >= 0 ? VALORES_APOSTA[idxAnterior] : 1;
+        sala.apostaAtual = valorAnterior;
+        sala.truco = { pendente: false, desafiante: null, desafiado: null, valorProposto: 0 };
         finalizarMao(salaId, desafiante);
     }
 }
