@@ -69,22 +69,40 @@ function verificarFimRodada(salaId) {
 
     let resultado = compararCartas(melhorPorEquipe['A'].carta, melhorPorEquipe['B'].carta, sala.manilhas);
 
-    // *** REGRA DE EMPATE CORRIGIDA ***
+    // *** REGRA DE EMPATE COM TRATAMENTO NA 3ª RODADA ***
     if (resultado === 0) {
-        // Empate: a rodada não conta para ninguém.
-        sala.ultimoVencedorRodada = sala.cartasNaMesa[sala.cartasNaMesa.length - 1].jogadorId;
-        // Se for a primeira rodada, a segunda vira a "primeira" (não muda placar).
-        // Se for a segunda rodada (e alguém já tiver 1 ponto), a terceira decide.
-        iniciarRodada(salaId);
+        // Se for a terceira rodada, força desempate por naipe da carta mais alta
+        if (sala.rodadaAtual === 3) {
+            // Determina o vencedor pela força do naipe da carta mais alta (já incluso na função compararCartas)
+            // Como resultado deu 0, significa que as cartas têm mesmo valor e são ambas manilhas ou ambas não-manilhas.
+            // A função compararCartas já considera naipes para manilhas; para não-manilhas, naipe não influencia.
+            // Mas no desempate de não-manilhas iguais, a regra é que vence a primeira carta jogada? Ou maior naipe?
+            // Vamos adotar: em caso de empate total (mesmo valor e mesmo status de manilha), vence quem tiver a carta de maior naipe (Paus > Copas > Espadas > Ouros).
+            const forcaNaipe = { 'paus': 4, 'copas': 3, 'espadas': 2, 'ouros': 1 };
+            const naipeA = melhorPorEquipe['A'].carta.naipe;
+            const naipeB = melhorPorEquipe['B'].carta.naipe;
+            const equipeVencedora = forcaNaipe[naipeA] > forcaNaipe[naipeB] ? 'A' : 'B';
+            
+            sala.placarRodadas[equipeVencedora]++;
+            sala.ultimoVencedorRodada = melhorPorEquipe[equipeVencedora].jogadorId;
+            io.to(salaId).emit('atualizarPlacarRodadas', { rodadasA: sala.placarRodadas['A'], rodadasB: sala.placarRodadas['B'] });
+            finalizarMao(salaId, sala.placarRodadas['A'] >= 2 ? 'A' : 'B');
+        } else {
+            // Empate nas 1ª ou 2ª rodadas: apenas avança para a próxima rodada
+            sala.ultimoVencedorRodada = sala.cartasNaMesa[sala.cartasNaMesa.length - 1].jogadorId;
+            iniciarRodada(salaId);
+        }
         return;
     }
 
+    // Se não empatou, há um vencedor para a rodada
     const equipeVencedora = resultado > 0 ? 'A' : 'B';
     sala.placarRodadas[equipeVencedora]++;
     sala.ultimoVencedorRodada = melhorPorEquipe[equipeVencedora].jogadorId;
 
     io.to(salaId).emit('atualizarPlacarRodadas', { rodadasA: sala.placarRodadas['A'], rodadasB: sala.placarRodadas['B'] });
 
+    // Verifica se a mão terminou (alguém fez 2 pontos)
     if (sala.placarRodadas['A'] >= 2 || sala.placarRodadas['B'] >= 2) {
         finalizarMao(salaId, sala.placarRodadas['A'] >= 2 ? 'A' : 'B');
     } else {
