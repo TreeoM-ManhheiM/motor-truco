@@ -68,46 +68,52 @@ function verificarFimRodada(salaId) {
     });
 
     let resultado = compararCartas(melhorPorEquipe['A'].carta, melhorPorEquipe['B'].carta, sala.manilhas);
+    console.log(`[Sala ${salaId}] Rodada ${sala.rodadaAtual} - Resultado comparação: ${resultado}`);
 
-    // *** REGRA DE EMPATE CORRIGIDA ***
+    // *** EMPATE ***
     if (resultado === 0) {
-        // Empatou a rodada
+        console.log(`[Sala ${salaId}] EMPATE na rodada ${sala.rodadaAtual}`);
         if (sala.rodadaAtual === 3) {
             // Terceira rodada: desempate por maior naipe
             const forcaNaipe = { 'paus': 4, 'copas': 3, 'espadas': 2, 'ouros': 1 };
             const naipeA = melhorPorEquipe['A'].carta.naipe;
             const naipeB = melhorPorEquipe['B'].carta.naipe;
             const equipeVencedora = forcaNaipe[naipeA] > forcaNaipe[naipeB] ? 'A' : 'B';
+            console.log(`[Sala ${salaId}] Desempate por naipe: ${equipeVencedora} vence`);
             
             sala.placarRodadas[equipeVencedora]++;
             sala.ultimoVencedorRodada = melhorPorEquipe[equipeVencedora].jogadorId;
             io.to(salaId).emit('atualizarPlacarRodadas', { rodadasA: sala.placarRodadas['A'], rodadasB: sala.placarRodadas['B'] });
-            // Finaliza a mão (a terceira rodada é sempre decisiva)
             finalizarMao(salaId, equipeVencedora);
         } else {
-            // Empate nas 1ª ou 2ª rodadas: apenas avança para a próxima rodada
+            // Empate nas 1ª ou 2ª rodadas: apenas avança
             sala.ultimoVencedorRodada = sala.cartasNaMesa[sala.cartasNaMesa.length - 1].jogadorId;
             iniciarRodada(salaId);
         }
         return;
     }
 
-    // Se não empatou, há um vencedor para a rodada
+    // *** VENCEDOR DA RODADA ***
     const equipeVencedora = resultado > 0 ? 'A' : 'B';
     sala.placarRodadas[equipeVencedora]++;
     sala.ultimoVencedorRodada = melhorPorEquipe[equipeVencedora].jogadorId;
 
+    console.log(`[Sala ${salaId}] Rodada ${sala.rodadaAtual} vencida por ${equipeVencedora}. Placar: ${sala.placarRodadas['A']} x ${sala.placarRodadas['B']}`);
+
     io.to(salaId).emit('atualizarPlacarRodadas', { rodadasA: sala.placarRodadas['A'], rodadasB: sala.placarRodadas['B'] });
 
-    // *** VERIFICAÇÃO DE FIM DE MÃO ***
-    // Caso especial: se a primeira rodada empatou (placar estava 0x0) e estamos na segunda rodada,
-    // qualquer vitória já finaliza a mão.
-    const primeiraRodadaEmpatou = (sala.rodadaAtual === 2 && sala.placarRodadas['A'] === 1 && sala.placarRodadas['B'] === 0) ||
-                                   (sala.rodadaAtual === 2 && sala.placarRodadas['A'] === 0 && sala.placarRodadas['B'] === 1);
+    // Verifica se a mão terminou
+    const primeiraRodadaEmpatou = (sala.rodadaAtual === 2 && 
+        ((sala.placarRodadas['A'] === 1 && sala.placarRodadas['B'] === 0) ||
+         (sala.placarRodadas['A'] === 0 && sala.placarRodadas['B'] === 1)));
     
     const alguemTemDoisPontos = (sala.placarRodadas['A'] >= 2 || sala.placarRodadas['B'] >= 2);
 
-    if (primeiraRodadaEmpatou || alguemTemDoisPontos) {
+    if (primeiraRodadaEmpatou) {
+        console.log(`[Sala ${salaId}] Primeira rodada empatou, segunda rodada decide. Finalizando mão.`);
+        finalizarMao(salaId, equipeVencedora);
+    } else if (alguemTemDoisPontos) {
+        console.log(`[Sala ${salaId}] Alguém fez 2 pontos. Finalizando mão.`);
         finalizarMao(salaId, equipeVencedora);
     } else {
         iniciarRodada(salaId);
@@ -125,6 +131,7 @@ function iniciarRodada(salaId) {
         sala.jogadorAtual = sala.ultimoVencedorRodada;
     }
 
+    console.log(`[Sala ${salaId}] Iniciando rodada ${sala.rodadaAtual}. Vez de ${sala.jogadorAtual}`);
     io.to(salaId).emit('novaRodada', { rodada: sala.rodadaAtual });
     io.to(salaId).emit('atualizarVez', { jogadorId: sala.jogadorAtual });
 }
@@ -133,6 +140,7 @@ function finalizarMao(salaId, equipeVencedora) {
     const sala = salas[salaId];
     let pontos = sala.apostaAtual;
     sala.pontuacao[equipeVencedora] += pontos;
+    console.log(`[Sala ${salaId}] Mão finalizada. Vencedor: ${equipeVencedora}. Pontos ganhos: ${pontos}. Total: ${sala.pontuacao['A']} x ${sala.pontuacao['B']}`);
     io.to(salaId).emit('fimDeMao', { pontuacao: sala.pontuacao, vencedorMao: equipeVencedora, pontosGanhos: pontos });
 
     if (sala.pontuacao[equipeVencedora] >= PONTOS_PARA_VENCER) {
@@ -163,6 +171,8 @@ function iniciarNovaMao(salaId) {
     if (sala.jogadorQueIniciaProximaMao === undefined) {
         sala.jogadorQueIniciaProximaMao = 0;
     }
+
+    console.log(`[Sala ${salaId}] Nova mão. Vira: ${sala.vira.valor} de ${sala.vira.naipe}. Manilhas: ${sala.manilhas.map(m => m.valor + m.naipe.charAt(0)).join(', ')}`);
 
     sala.jogadores.forEach(j => {
         io.to(j.id).emit('iniciarMao', {
