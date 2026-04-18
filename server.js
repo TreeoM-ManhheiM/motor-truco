@@ -69,10 +69,10 @@ function verificarFimRodada(salaId) {
 
     let resultado = compararCartas(melhorPorEquipe['A'].carta, melhorPorEquipe['B'].carta, sala.manilhas);
 
-    // *** REGRA DE EMPATE COM TRATAMENTO NA 3ª RODADA ***
+    // *** REGRA DE EMPATE ***
     if (resultado === 0) {
         if (sala.rodadaAtual === 3) {
-            // Desempate por maior naipe da carta mais alta
+            // Desempate por maior naipe
             const forcaNaipe = { 'paus': 4, 'copas': 3, 'espadas': 2, 'ouros': 1 };
             const naipeA = melhorPorEquipe['A'].carta.naipe;
             const naipeB = melhorPorEquipe['B'].carta.naipe;
@@ -81,7 +81,17 @@ function verificarFimRodada(salaId) {
             sala.placarRodadas[equipeVencedora]++;
             sala.ultimoVencedorRodada = melhorPorEquipe[equipeVencedora].jogadorId;
             io.to(salaId).emit('atualizarPlacarRodadas', { rodadasA: sala.placarRodadas['A'], rodadasB: sala.placarRodadas['B'] });
-            finalizarMao(salaId, sala.placarRodadas['A'] >= 2 ? 'A' : 'B');
+            
+            // Como a terceira rodada terminou com desempate, alguém atingiu 2 pontos (se já tinha 1) ou não? 
+            // Se já tinha 1 ponto, agora tem 2 e a mão acaba. Se tinha 0, agora tem 1, mas a terceira rodada foi a última possível, então a mão deveria acabar de qualquer forma.
+            // Mas a regra é: após 3 rodadas, se ninguém fez 2 pontos, o desempate define o vencedor da mão.
+            if (sala.placarRodadas['A'] >= 2 || sala.placarRodadas['B'] >= 2) {
+                finalizarMao(salaId, sala.placarRodadas['A'] >= 2 ? 'A' : 'B');
+            } else {
+                // Força a finalização da mão mesmo se o placar estiver 1x1 após a terceira rodada?
+                // Pela regra, a terceira rodada sempre decide, então o vencedor dela ganha a mão.
+                finalizarMao(salaId, equipeVencedora);
+            }
         } else {
             // Empate nas 1ª ou 2ª rodadas: apenas avança para a próxima rodada
             sala.ultimoVencedorRodada = sala.cartasNaMesa[sala.cartasNaMesa.length - 1].jogadorId;
