@@ -94,19 +94,17 @@ function verificarFimRodada(salaId) {
     const resultado = compararCartas(melhor.A.carta, melhor.B.carta, valorManilha);
     console.log(`[TRUCO] Resultado comparação: ${resultado} (${resultado > 0 ? 'A vence' : (resultado < 0 ? 'B vence' : 'Empate')})`);
 
-    // 🛡️ PROTEÇÃO MÁXIMA: se já passou da 3ª rodada, força fim da mão com desempate
+    // Força fim da mão se passou da 3ª rodada (proteção extra)
     if (sala.rodadaAtual >= 3) {
         console.log(`[TRUCO] ⚠️ Rodada ${sala.rodadaAtual} excedeu limite! Forçando fim da mão por desempate.`);
         const nA = melhor.A.carta.naipe;
         const nB = melhor.B.carta.naipe;
         const vencedor = FORCA_NAIPE[nA] > FORCA_NAIPE[nB] ? 'A' : 'B';
-        console.log(`[TRUCO] Desempate por naipe: ${vencedor}`);
         finalizarMao(salaId, vencedor);
         return;
     }
 
     if (resultado === 0) {
-        // Empate
         console.log(`[TRUCO] Empate na rodada ${sala.rodadaAtual}`);
         if (sala.rodadaAtual === 3) {
             const nA = melhor.A.carta.naipe;
