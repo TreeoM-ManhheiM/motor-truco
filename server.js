@@ -30,33 +30,38 @@ function embaralhar(baralho) {
     }
     return baralho;
 }
-function definirManilhas(vira) {
+// Retorna apenas o VALOR da manilha (ex: '2')
+function getValorManilha(vira) {
     let idx = VALORES.indexOf(vira.valor);
-    let valorManilha = VALORES[(idx + 1) % VALORES.length];
-    return NAIPES.map(n => ({ naipe: n, valor: valorManilha }));
+    return VALORES[(idx + 1) % VALORES.length];
 }
 
-// 🔧 COMPARAÇÃO ROBUSTA E CORRETA
-function compararCartas(carta1, carta2, manilhas) {
-    // Verifica se cada carta está na lista de manilhas
-    const m1 = manilhas.some(m => m.naipe === carta1.naipe && m.valor === carta1.valor);
-    const m2 = manilhas.some(m => m.naipe === carta2.naipe && m.valor === carta2.valor);
+// 🔧 COMPARAÇÃO TOTALMENTE REESCRITA E À PROVA DE FALHAS
+// Agora recebe o valor da manilha (string) em vez do array de manilhas
+function compararCartas(carta1, carta2, valorManilha) {
+    const v1 = carta1.valor;
+    const v2 = carta2.valor;
+    const n1 = carta1.naipe;
+    const n2 = carta2.naipe;
 
-    // Caso 1: apenas uma é manilha
-    if (m1 && !m2) return 1;
-    if (!m1 && m2) return -1;
+    const manilha1 = (v1 === valorManilha);
+    const manilha2 = (v2 === valorManilha);
 
-    // Caso 2: ambas são manilhas → desempate por naipe
-    if (m1 && m2) {
-        return FORCA_NAIPE[carta1.naipe] - FORCA_NAIPE[carta2.naipe];
+    // 1. Apenas uma é manilha
+    if (manilha1 && !manilha2) return 1;
+    if (!manilha1 && manilha2) return -1;
+
+    // 2. Ambas são manilhas → desempate por naipe
+    if (manilha1 && manilha2) {
+        return FORCA_NAIPE[n1] - FORCA_NAIPE[n2];
     }
 
-    // Caso 3: nenhuma é manilha → compara pela força
-    const f1 = FORCA_CARTA[carta1.valor];
-    const f2 = FORCA_CARTA[carta2.valor];
+    // 3. Nenhuma é manilha → compara pela força da carta
+    const f1 = FORCA_CARTA[v1];
+    const f2 = FORCA_CARTA[v2];
     if (f1 !== f2) return f1 - f2;
 
-    // Caso 4: cartas comuns de mesmo valor → empate
+    // 4. Cartas comuns de mesmo valor → empate (sem olhar naipe)
     return 0;
 }
 
@@ -75,14 +80,17 @@ function verificarFimRodada(salaId) {
         return;
     }
 
+    // Obtém o valor da manilha para esta mão (baseado na vira)
+    const valorManilha = getValorManilha(sala.vira);
+
     let melhor = { A: null, B: null };
     sala.cartasNaMesa.forEach(j => {
         let atual = melhor[j.equipe];
-        if (!atual || compararCartas(j.carta, atual.carta, sala.manilhas) > 0)
+        if (!atual || compararCartas(j.carta, atual.carta, valorManilha) > 0)
             melhor[j.equipe] = j;
     });
 
-    const resultado = compararCartas(melhor.A.carta, melhor.B.carta, sala.manilhas);
+    const resultado = compararCartas(melhor.A.carta, melhor.B.carta, valorManilha);
 
     if (resultado === 0) {
         // Empate
@@ -111,11 +119,9 @@ function verificarFimRodada(salaId) {
     const pontosB = sala.placarRodadas.B;
     const rodadaAtual = sala.rodadaAtual;
 
-    // Condições de fim de mão
     if (pontosA >= 2 || pontosB >= 2) {
         finalizarMao(salaId, equipeVencedora);
     } else if (rodadaAtual === 2 && (pontosA === 1 || pontosB === 1)) {
-        // Primeira rodada empatou (0x0) e segunda teve vencedor
         finalizarMao(salaId, equipeVencedora);
     } else {
         iniciarRodada(salaId);
@@ -156,7 +162,6 @@ function iniciarNovaMao(salaId) {
     const sala = salas[salaId];
     sala.baralho = criarBaralho();
     sala.vira = sala.baralho.pop();
-    sala.manilhas = definirManilhas(sala.vira);
     sala.maos = {};
     sala.jogadores.forEach(j => sala.maos[j.id] = [sala.baralho.pop(), sala.baralho.pop(), sala.baralho.pop()]);
     sala.rodadaAtual = 0;
