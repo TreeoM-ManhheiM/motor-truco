@@ -67,25 +67,25 @@ function verificarFimRodada(salaId) {
             melhorPorEquipe[jogada.equipe] = jogada;
     });
 
-    let vencedor = null;
-    if (melhorPorEquipe['A'] && melhorPorEquipe['B']) {
-        let resultado = compararCartas(melhorPorEquipe['A'].carta, melhorPorEquipe['B'].carta, sala.manilhas);
-        vencedor = resultado > 0 ? 'A' : (resultado < 0 ? 'B' : null);
-    } else if (melhorPorEquipe['A']) vencedor = 'A';
-    else if (melhorPorEquipe['B']) vencedor = 'B';
+    let resultado = compararCartas(melhorPorEquipe['A'].carta, melhorPorEquipe['B'].carta, sala.manilhas);
 
-    if (vencedor) {
-        sala.placarRodadas[vencedor]++;
-        sala.ultimoVencedorRodada = melhorPorEquipe[vencedor].jogadorId;
-        io.to(salaId).emit('atualizarPlacarRodadas', { rodadasA: sala.placarRodadas['A'], rodadasB: sala.placarRodadas['B'] });
-
-        if (sala.placarRodadas['A'] >= 2 || sala.placarRodadas['B'] >= 2) {
-            finalizarMao(salaId, sala.placarRodadas['A'] >= 2 ? 'A' : 'B');
-        } else {
-            iniciarRodada(salaId);
-        }
-    } else {
+    // *** REGRA DE EMPATE CORRIGIDA ***
+    if (resultado === 0) {
+        // Empate: ninguém marca ponto, próximo a jogar é quem jogou a última carta
         sala.ultimoVencedorRodada = sala.cartasNaMesa[sala.cartasNaMesa.length - 1].jogadorId;
+        iniciarRodada(salaId);
+        return;
+    }
+
+    const equipeVencedora = resultado > 0 ? 'A' : 'B';
+    sala.placarRodadas[equipeVencedora]++;
+    sala.ultimoVencedorRodada = melhorPorEquipe[equipeVencedora].jogadorId;
+
+    io.to(salaId).emit('atualizarPlacarRodadas', { rodadasA: sala.placarRodadas['A'], rodadasB: sala.placarRodadas['B'] });
+
+    if (sala.placarRodadas['A'] >= 2 || sala.placarRodadas['B'] >= 2) {
+        finalizarMao(salaId, sala.placarRodadas['A'] >= 2 ? 'A' : 'B');
+    } else {
         iniciarRodada(salaId);
     }
 }
@@ -94,7 +94,14 @@ function iniciarRodada(salaId) {
     const sala = salas[salaId];
     sala.rodadaAtual++;
     sala.cartasNaMesa = [];
-    sala.jogadorAtual = sala.rodadaAtual === 1 ? sala.ordemJogadores[0] : sala.ultimoVencedorRodada;
+    
+    // Define quem inicia a rodada
+    if (sala.rodadaAtual === 1) {
+        sala.jogadorAtual = sala.ordemJogadores[sala.jogadorQueIniciaProximaMao];
+    } else {
+        sala.jogadorAtual = sala.ultimoVencedorRodada;
+    }
+
     io.to(salaId).emit('novaRodada', { rodada: sala.rodadaAtual });
     io.to(salaId).emit('atualizarVez', { jogadorId: sala.jogadorAtual });
 }
@@ -111,6 +118,8 @@ function finalizarMao(salaId, equipeVencedora) {
         sala.jogadores.forEach(j => j.pronto = false);
         io.to(salaId).emit('atualizarLobby', { jogadores: sala.jogadores, modo: sala.modo, estado: sala.estado });
     } else {
+        // Alterna o jogador que inicia a próxima mão
+        sala.jogadorQueIniciaProximaMao = (sala.jogadorQueIniciaProximaMao + 1) % sala.ordemJogadores.length;
         iniciarNovaMao(salaId);
     }
 }
@@ -129,6 +138,10 @@ function iniciarNovaMao(salaId) {
     sala.ultimoVencedorRodada = null;
     sala.ordemJogadores = sala.jogadores.map(j => j.id);
     sala.truco = { pendente: false, desafiante: null, desafiado: null, valorProposto: 3 };
+    // Inicializa a variável de controle se não existir
+    if (sala.jogadorQueIniciaProximaMao === undefined) {
+        sala.jogadorQueIniciaProximaMao = 0;
+    }
 
     sala.jogadores.forEach(j => {
         io.to(j.id).emit('iniciarMao', {
@@ -182,7 +195,6 @@ function responderTruco(salaId, socketId, aceitou, aumentar) {
     }
 
     const desafianteEquipe = sala.truco.desafiante;
-    const valorAnterior = sala.apostaAtual;
     const valorProposto = sala.truco.valorProposto;
 
     if (aceitou) {
@@ -222,7 +234,7 @@ io.on('connection', (socket) => {
         if (!salas[nomeSala]) {
             salas[nomeSala] = {
                 jogadores: [], espectadores: [], modo: modo || '1x1', estado: 'aguardando',
-                pontuacao: { 'A': 0, 'B': 0 }
+                pontuacao: { 'A': 0, 'B': 0 }, jogadorQueIniciaProximaMao: 0
             };
         }
         const sala = salas[nomeSala];
