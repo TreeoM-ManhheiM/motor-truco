@@ -13,6 +13,14 @@ const VALORES = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'];
 const PONTOS_PARA_VENCER = 12;
 const VALORES_APOSTA = [1, 3, 6, 9, 12];
 
+// Mapa de força para cartas NÃO manilhas (maior número = mais forte)
+const FORCA_CARTA = {
+    '4': 1, '5': 2, '6': 3, '7': 4,
+    'Q': 5, 'J': 6, 'K': 7, 'A': 8, '2': 9, '3': 10
+};
+// Mapa de força para naipes (usado apenas para desempate de manilhas ou cartas iguais)
+const FORCA_NAIPE = { 'paus': 4, 'copas': 3, 'espadas': 2, 'ouros': 1 };
+
 let salas = {};
 
 function criarBaralho() {
@@ -32,17 +40,30 @@ function definirManilhas(vira) {
     let valorManilha = VALORES[(indiceVira + 1) % VALORES.length];
     return NAIPES.map(naipe => ({ naipe, valor: valorManilha }));
 }
+
+// NOVA FUNÇÃO DE COMPARAÇÃO – ROBUSTA E CORRIGIDA
 function compararCartas(carta1, carta2, manilhas) {
-    const manilha1 = manilhas.find(m => m.naipe === carta1.naipe && m.valor === carta1.valor);
-    const manilha2 = manilhas.find(m => m.naipe === carta2.naipe && m.valor === carta2.valor);
-    if (manilha1 && !manilha2) return 1;
-    if (!manilha1 && manilha2) return -1;
-    if (manilha1 && manilha2) {
-        const forcaNaipe = { 'paus': 4, 'copas': 3, 'espadas': 2, 'ouros': 1 };
-        return forcaNaipe[carta1.naipe] - forcaNaipe[carta2.naipe];
+    // Verifica se cada carta é manilha
+    const isManilha1 = manilhas.some(m => m.naipe === carta1.naipe && m.valor === carta1.valor);
+    const isManilha2 = manilhas.some(m => m.naipe === carta2.naipe && m.valor === carta2.valor);
+
+    // Se uma é manilha e a outra não, a manilha vence
+    if (isManilha1 && !isManilha2) return 1;
+    if (!isManilha1 && isManilha2) return -1;
+
+    // Se ambas são manilhas, desempata pelo naipe
+    if (isManilha1 && isManilha2) {
+        return FORCA_NAIPE[carta1.naipe] - FORCA_NAIPE[carta2.naipe];
     }
-    const forcaCarta = { '3': 10, '2': 9, 'A': 8, 'K': 7, 'J': 6, 'Q': 5, '7': 4, '6': 3, '5': 2, '4': 1 };
-    return forcaCarta[carta1.valor] - forcaCarta[carta2.valor];
+
+    // Nenhuma é manilha: compara pela força da carta
+    const forca1 = FORCA_CARTA[carta1.valor];
+    const forca2 = FORCA_CARTA[carta2.valor];
+    if (forca1 !== forca2) {
+        return forca1 - forca2;
+    }
+    // Se as cartas têm o mesmo valor (ex: dois "Q"), desempata pelo naipe (regra comum)
+    return FORCA_NAIPE[carta1.naipe] - FORCA_NAIPE[carta2.naipe];
 }
 
 function passarVez(salaId) {
@@ -60,6 +81,7 @@ function verificarFimRodada(salaId) {
         return;
     }
 
+    // Encontra a melhor carta de cada equipe na rodada
     let melhorPorEquipe = { 'A': null, 'B': null };
     sala.cartasNaMesa.forEach(jogada => {
         let melhor = melhorPorEquipe[jogada.equipe];
@@ -67,57 +89,63 @@ function verificarFimRodada(salaId) {
             melhorPorEquipe[jogada.equipe] = jogada;
     });
 
-    let resultado = compararCartas(melhorPorEquipe['A'].carta, melhorPorEquipe['B'].carta, sala.manilhas);
-    console.log(`[Sala ${salaId}] Rodada ${sala.rodadaAtual} - Resultado comparação: ${resultado}`);
+    const resultado = compararCartas(melhorPorEquipe['A'].carta, melhorPorEquipe['B'].carta, sala.manilhas);
 
-    // *** EMPATE ***
+    // TRATAMENTO DE EMPATE
     if (resultado === 0) {
-        console.log(`[Sala ${salaId}] EMPATE na rodada ${sala.rodadaAtual}`);
+        console.log(`[Sala ${salaId}] Rodada ${sala.rodadaAtual} empatou.`);
         if (sala.rodadaAtual === 3) {
-            // Terceira rodada: desempate por maior naipe
-            const forcaNaipe = { 'paus': 4, 'copas': 3, 'espadas': 2, 'ouros': 1 };
+            // Terceira rodada: desempate por naipe já foi considerado em compararCartas (retornaria ≠0 se naipes diferentes)
+            // Se chegou aqui com resultado 0, significa que as cartas são idênticas em valor e naipe? Impossível no baralho.
+            // Mas por segurança, forçamos o desempate pelo naipe da carta mais alta de cada equipe.
             const naipeA = melhorPorEquipe['A'].carta.naipe;
             const naipeB = melhorPorEquipe['B'].carta.naipe;
-            const equipeVencedora = forcaNaipe[naipeA] > forcaNaipe[naipeB] ? 'A' : 'B';
-            console.log(`[Sala ${salaId}] Desempate por naipe: ${equipeVencedora} vence`);
-            
+            const equipeVencedora = FORCA_NAIPE[naipeA] > FORCA_NAIPE[naipeB] ? 'A' : 'B';
+            console.log(`[Sala ${salaId}] Desempate por naipe: ${equipeVencedora} vence.`);
             sala.placarRodadas[equipeVencedora]++;
             sala.ultimoVencedorRodada = melhorPorEquipe[equipeVencedora].jogadorId;
             io.to(salaId).emit('atualizarPlacarRodadas', { rodadasA: sala.placarRodadas['A'], rodadasB: sala.placarRodadas['B'] });
             finalizarMao(salaId, equipeVencedora);
         } else {
-            // Empate nas 1ª ou 2ª rodadas: apenas avança
+            // Empate na 1ª ou 2ª rodada: passa para a próxima
             sala.ultimoVencedorRodada = sala.cartasNaMesa[sala.cartasNaMesa.length - 1].jogadorId;
             iniciarRodada(salaId);
         }
         return;
     }
 
-    // *** VENCEDOR DA RODADA ***
+    // HÁ UM VENCEDOR NA RODADA
     const equipeVencedora = resultado > 0 ? 'A' : 'B';
     sala.placarRodadas[equipeVencedora]++;
     sala.ultimoVencedorRodada = melhorPorEquipe[equipeVencedora].jogadorId;
 
-    console.log(`[Sala ${salaId}] Rodada ${sala.rodadaAtual} vencida por ${equipeVencedora}. Placar: ${sala.placarRodadas['A']} x ${sala.placarRodadas['B']}`);
+    console.log(`[Sala ${salaId}] Rodada ${sala.rodadaAtual} vencida por ${equipeVencedora}. Placar de rodadas: ${sala.placarRodadas['A']} x ${sala.placarRodadas['B']}`);
 
     io.to(salaId).emit('atualizarPlacarRodadas', { rodadasA: sala.placarRodadas['A'], rodadasB: sala.placarRodadas['B'] });
 
-    // Verifica se a mão terminou
-    const primeiraRodadaEmpatou = (sala.rodadaAtual === 2 && 
-        ((sala.placarRodadas['A'] === 1 && sala.placarRodadas['B'] === 0) ||
-         (sala.placarRodadas['A'] === 0 && sala.placarRodadas['B'] === 1)));
-    
-    const alguemTemDoisPontos = (sala.placarRodadas['A'] >= 2 || sala.placarRodadas['B'] >= 2);
+    // VERIFICA SE A MÃO TERMINOU
+    const totalRodadas = sala.rodadaAtual;
+    const pontosA = sala.placarRodadas['A'];
+    const pontosB = sala.placarRodadas['B'];
 
-    if (primeiraRodadaEmpatou) {
+    // Condição 1: alguém fez 2 pontos (normal)
+    if (pontosA >= 2 || pontosB >= 2) {
+        console.log(`[Sala ${salaId}] Mão finalizada por 2 pontos.`);
+        finalizarMao(salaId, equipeVencedora);
+        return;
+    }
+
+    // Condição 2: estamos na 2ª rodada, a 1ª empatou (placar 0x0) e alguém venceu a 2ª (placar 1x0)
+    // Isso é detectado por: totalRodadas === 2 && (pontosA === 1 || pontosB === 1) && antes estava 0x0.
+    if (totalRodadas === 2 && (pontosA === 1 || pontosB === 1)) {
         console.log(`[Sala ${salaId}] Primeira rodada empatou, segunda rodada decide. Finalizando mão.`);
         finalizarMao(salaId, equipeVencedora);
-    } else if (alguemTemDoisPontos) {
-        console.log(`[Sala ${salaId}] Alguém fez 2 pontos. Finalizando mão.`);
-        finalizarMao(salaId, equipeVencedora);
-    } else {
-        iniciarRodada(salaId);
+        return;
     }
+
+    // Condição 3: se por algum motivo a terceira rodada terminou com 1x1 (impossível aqui, pois já tratamos empate)
+    // Apenas inicia próxima rodada se necessário
+    iniciarRodada(salaId);
 }
 
 function iniciarRodada(salaId) {
