@@ -71,13 +71,8 @@ function verificarFimRodada(salaId) {
 
     // *** REGRA DE EMPATE COM TRATAMENTO NA 3ª RODADA ***
     if (resultado === 0) {
-        // Se for a terceira rodada, força desempate por naipe da carta mais alta
         if (sala.rodadaAtual === 3) {
-            // Determina o vencedor pela força do naipe da carta mais alta (já incluso na função compararCartas)
-            // Como resultado deu 0, significa que as cartas têm mesmo valor e são ambas manilhas ou ambas não-manilhas.
-            // A função compararCartas já considera naipes para manilhas; para não-manilhas, naipe não influencia.
-            // Mas no desempate de não-manilhas iguais, a regra é que vence a primeira carta jogada? Ou maior naipe?
-            // Vamos adotar: em caso de empate total (mesmo valor e mesmo status de manilha), vence quem tiver a carta de maior naipe (Paus > Copas > Espadas > Ouros).
+            // Desempate por maior naipe da carta mais alta
             const forcaNaipe = { 'paus': 4, 'copas': 3, 'espadas': 2, 'ouros': 1 };
             const naipeA = melhorPorEquipe['A'].carta.naipe;
             const naipeB = melhorPorEquipe['B'].carta.naipe;
