@@ -30,15 +30,24 @@ function embaralhar(baralho) {
     }
     return baralho;
 }
-// Retorna apenas o VALOR da manilha (ex: '2')
+
+// Retorna o VALOR da manilha baseado na vira
 function getValorManilha(vira) {
+    if (!vira || !vira.valor) return null;
     let idx = VALORES.indexOf(vira.valor);
     return VALORES[(idx + 1) % VALORES.length];
 }
 
-// 🔧 COMPARAÇÃO TOTALMENTE REESCRITA E À PROVA DE FALHAS
-// Agora recebe o valor da manilha (string) em vez do array de manilhas
+// 🔧 COMPARAÇÃO BLINDADA
 function compararCartas(carta1, carta2, valorManilha) {
+    // Se por algum motivo o valor da manilha não foi definido, considera que não há manilhas (nunca deve ocorrer)
+    if (!valorManilha) {
+        // fallback: compara apenas pela força (não ideal, mas evita crash)
+        const f1 = FORCA_CARTA[carta1.valor] || 0;
+        const f2 = FORCA_CARTA[carta2.valor] || 0;
+        return f1 - f2;
+    }
+
     const v1 = carta1.valor;
     const v2 = carta2.valor;
     const n1 = carta1.naipe;
@@ -56,12 +65,12 @@ function compararCartas(carta1, carta2, valorManilha) {
         return FORCA_NAIPE[n1] - FORCA_NAIPE[n2];
     }
 
-    // 3. Nenhuma é manilha → compara pela força da carta
+    // 3. Nenhuma é manilha → compara pela força
     const f1 = FORCA_CARTA[v1];
     const f2 = FORCA_CARTA[v2];
     if (f1 !== f2) return f1 - f2;
 
-    // 4. Cartas comuns de mesmo valor → empate (sem olhar naipe)
+    // 4. Cartas comuns de mesmo valor → empate
     return 0;
 }
 
@@ -80,8 +89,9 @@ function verificarFimRodada(salaId) {
         return;
     }
 
-    // Obtém o valor da manilha para esta mão (baseado na vira)
     const valorManilha = getValorManilha(sala.vira);
+    // Log para depuração (pode remover depois)
+    console.log(`[DEBUG] Vira: ${sala.vira.valor} de ${sala.vira.naipe} -> Manilha: ${valorManilha}`);
 
     let melhor = { A: null, B: null };
     sala.cartasNaMesa.forEach(j => {
@@ -91,14 +101,16 @@ function verificarFimRodada(salaId) {
     });
 
     const resultado = compararCartas(melhor.A.carta, melhor.B.carta, valorManilha);
+    console.log(`[DEBUG] Resultado comparação: ${resultado}`);
 
     if (resultado === 0) {
         // Empate
+        console.log(`[DEBUG] Empate na rodada ${sala.rodadaAtual}`);
         if (sala.rodadaAtual === 3) {
-            // Terceira rodada empatada → desempate por naipe da carta mais alta
             const nA = melhor.A.carta.naipe;
             const nB = melhor.B.carta.naipe;
             const vencedor = FORCA_NAIPE[nA] > FORCA_NAIPE[nB] ? 'A' : 'B';
+            console.log(`[DEBUG] Desempate 3ª rodada por naipe: ${vencedor}`);
             sala.placarRodadas[vencedor]++;
             sala.ultimoVencedorRodada = melhor[vencedor].jogadorId;
             io.to(salaId).emit('atualizarPlacarRodadas', { rodadasA: sala.placarRodadas.A, rodadasB: sala.placarRodadas.B });
@@ -113,6 +125,7 @@ function verificarFimRodada(salaId) {
     const equipeVencedora = resultado > 0 ? 'A' : 'B';
     sala.placarRodadas[equipeVencedora]++;
     sala.ultimoVencedorRodada = melhor[equipeVencedora].jogadorId;
+    console.log(`[DEBUG] Vencedor da rodada: ${equipeVencedora}. Placar: ${sala.placarRodadas.A} x ${sala.placarRodadas.B}`);
     io.to(salaId).emit('atualizarPlacarRodadas', { rodadasA: sala.placarRodadas.A, rodadasB: sala.placarRodadas.B });
 
     const pontosA = sala.placarRodadas.A;
