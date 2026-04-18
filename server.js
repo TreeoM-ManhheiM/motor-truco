@@ -82,7 +82,6 @@ function verificarFimRodada(salaId) {
     const resultado = compararCartas(melhor.A.carta, melhor.B.carta, sala.vira);
     console.log(`[TRUCO] Resultado: ${resultado} -> ${resultado > 0 ? 'A vence' : (resultado < 0 ? 'B vence' : 'Empate')}`);
 
-    // Força fim da mão se passou da 3ª rodada
     if (sala.rodadaAtual >= 3) {
         console.log(`[TRUCO] ⚠️ Rodada ${sala.rodadaAtual} excedeu limite! Forçando fim da mão.`);
         const vencedor = resultado > 0 ? 'A' : (resultado < 0 ? 'B' : (FORCA_NAIPE[melhor.A.carta.naipe] > FORCA_NAIPE[melhor.B.carta.naipe] ? 'A' : 'B'));
@@ -92,6 +91,9 @@ function verificarFimRodada(salaId) {
 
     if (resultado === 0) {
         console.log(`[TRUCO] Empate na rodada ${sala.rodadaAtual}`);
+        if (sala.rodadaAtual === 1) {
+            sala.primeiraRodadaEmpatou = true;   // 🟢 NOVA FLAG
+        }
         if (sala.rodadaAtual === 3) {
             const nA = melhor.A.carta.naipe;
             const nB = melhor.B.carta.naipe;
@@ -122,7 +124,8 @@ function verificarFimRodada(salaId) {
     if (pontosA >= 2 || pontosB >= 2) {
         console.log(`[TRUCO] Mão finalizada por 2 pontos.`);
         finalizarMao(salaId, equipeVencedora);
-    } else if (rodadaAtual === 2 && (pontosA === 1 || pontosB === 1)) {
+    } else if (rodadaAtual === 2 && (pontosA === 1 || pontosB === 1) && sala.primeiraRodadaEmpatou) {
+        // 🟢 SÓ FINALIZA SE A PRIMEIRA RODADA FOI EMPATE
         console.log(`[TRUCO] Mão finalizada após 1ª rodada empatada e 2ª com vencedor.`);
         finalizarMao(salaId, equipeVencedora);
     } else {
@@ -175,6 +178,7 @@ function iniciarNovaMao(salaId) {
     sala.ultimoVencedorRodada = null;
     sala.ordemJogadores = sala.jogadores.map(j => j.id);
     sala.truco = { pendente: false, desafiante: null, desafiado: null, valorProposto: 3 };
+    sala.primeiraRodadaEmpatou = false;   // 🟢 reset da flag
     if (sala.jogadorQueIniciaProximaMao === undefined) sala.jogadorQueIniciaProximaMao = 0;
 
     sala.jogadores.forEach(j => {
@@ -189,7 +193,7 @@ function iniciarNovaMao(salaId) {
     io.to(salaId).emit('atualizarAposta', { aposta: 1 });
 }
 
-// ---------- TRUCO (CORRIGIDO) ----------
+// ---------- TRUCO (mantido igual à última versão corrigida) ----------
 function pedirTruco(salaId, socketId) {
     const sala = salas[salaId];
     if (!sala || sala.estado !== 'jogando') return;
@@ -200,12 +204,7 @@ function pedirTruco(salaId, socketId) {
     if (idx === VALORES_APOSTA.length-1) return;
     const proximo = VALORES_APOSTA[idx+1];
     const adversarios = sala.jogadores.filter(j => j.equipe !== jogador.equipe);
-    sala.truco = {
-        pendente: true,
-        desafiante: jogador.equipe,
-        desafiado: adversarios.map(a => a.id),
-        valorProposto: proximo
-    };
+    sala.truco = { pendente: true, desafiante: jogador.equipe, desafiado: adversarios.map(a=>a.id), valorProposto: proximo };
     adversarios.forEach(a => io.to(a.id).emit('trucoPedido', { valor: proximo, de: jogador.nome }));
     io.to(socketId).emit('trucoPedidoEnviado', { valor: proximo });
 }
@@ -215,40 +214,29 @@ function responderTruco(salaId, socketId, aceitou, aumentar) {
     if (!sala || !sala.truco.pendente) return;
     const jogador = sala.jogadores.find(j => j.id === socketId);
     if (!jogador) return;
-    if (jogador.equipe === sala.truco.desafiante) {
-        io.to(socketId).emit('erro', 'Resposta é do adversário');
-        return;
-    }
-
-    const desafianteEquipe = sala.truco.desafiante;
-    const valorProposto = sala.truco.valorProposto;
+    if (jogador.equipe === sala.truco.desafiante) { io.to(socketId).emit('erro', 'Resposta é do adversário'); return; }
+    const desafiante = sala.truco.desafiante;
+    const valor = sala.truco.valorProposto;
 
     if (aceitou) {
-        // Aceitou: a aposta sobe para o valor proposto e o jogo continua
-        sala.apostaAtual = valorProposto;
+        sala.apostaAtual = valor;
         sala.truco = { pendente: false, desafiante: null, desafiado: null, valorProposto: 0 };
-        io.to(salaId).emit('trucoAceito', { novaAposta: sala.apostaAtual });
-        io.to(salaId).emit('atualizarAposta', { aposta: sala.apostaAtual });
+        io.to(salaId).emit('trucoAceito', { novaAposta: valor });
+        io.to(salaId).emit('atualizarAposta', { aposta: valor });
     } else if (aumentar) {
-        // Aumentar: primeiro aceita o valor atual, depois propõe um valor maior e inverte o desafiante
-        sala.apostaAtual = valorProposto;   // <-- CORREÇÃO CRÍTICA: aceita o valor atual antes de aumentar
-        const idxAtual = VALORES_APOSTA.indexOf(valorProposto);
-        if (idxAtual === VALORES_APOSTA.length - 1) return; // já está no máximo (12)
-        const novoValor = VALORES_APOSTA[idxAtual + 1];
+        sala.apostaAtual = valor;   // aceita o valor atual antes de aumentar
+        const idx = VALORES_APOSTA.indexOf(valor);
+        if (idx === VALORES_APOSTA.length-1) return;
+        const novo = VALORES_APOSTA[idx+1];
         const adversarios = sala.jogadores.filter(j => j.equipe !== jogador.equipe);
-        sala.truco = {
-            pendente: true,
-            desafiante: jogador.equipe,       // agora quem respondeu se torna o desafiante
-            desafiado: adversarios.map(a => a.id),
-            valorProposto: novoValor
-        };
-        io.to(salaId).emit('trucoAumentado', { de: jogador.nome, valor: novoValor });
+        sala.truco = { pendente: true, desafiante: jogador.equipe, desafiado: adversarios.map(a=>a.id), valorProposto: novo };
+        io.to(salaId).emit('trucoAumentado', { de: jogador.nome, valor: novo });
         io.to(salaId).emit('atualizarAposta', { aposta: sala.apostaAtual });
-        adversarios.forEach(a => io.to(a.id).emit('trucoPedido', { valor: novoValor, de: jogador.nome }));
+        adversarios.forEach(a => io.to(a.id).emit('trucoPedido', { valor: novo, de: jogador.nome }));
     } else {
-        // Correr: o desafiante ganha o valor já aceito (sala.apostaAtual)
+        // Correr: desafiante ganha o valor atual
         sala.truco = { pendente: false, desafiante: null, desafiado: null, valorProposto: 0 };
-        finalizarMao(salaId, desafianteEquipe);
+        finalizarMao(salaId, desafiante);
     }
 }
 
