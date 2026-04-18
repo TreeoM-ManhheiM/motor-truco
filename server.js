@@ -82,6 +82,7 @@ function verificarFimRodada(salaId) {
     const resultado = compararCartas(melhor.A.carta, melhor.B.carta, sala.vira);
     console.log(`[TRUCO] Resultado: ${resultado} -> ${resultado > 0 ? 'A vence' : (resultado < 0 ? 'B vence' : 'Empate')}`);
 
+    // Proteção contra rodada extra
     if (sala.rodadaAtual >= 3) {
         console.log(`[TRUCO] ⚠️ Rodada ${sala.rodadaAtual} excedeu limite! Forçando fim da mão.`);
         const vencedor = resultado > 0 ? 'A' : (resultado < 0 ? 'B' : (FORCA_NAIPE[melhor.A.carta.naipe] > FORCA_NAIPE[melhor.B.carta.naipe] ? 'A' : 'B'));
@@ -92,7 +93,8 @@ function verificarFimRodada(salaId) {
     if (resultado === 0) {
         console.log(`[TRUCO] Empate na rodada ${sala.rodadaAtual}`);
         if (sala.rodadaAtual === 1) {
-            sala.primeiraRodadaEmpatou = true;   // 🟢 NOVA FLAG
+            sala.primeiraRodadaEmpatou = true;   // 🟢 MARCA QUE A PRIMEIRA EMPATOU
+            console.log(`[TRUCO] Flag primeiraRodadaEmpatou = TRUE`);
         }
         if (sala.rodadaAtual === 3) {
             const nA = melhor.A.carta.naipe;
@@ -110,10 +112,11 @@ function verificarFimRodada(salaId) {
         return;
     }
 
+    // Não empatou: há um vencedor
     const equipeVencedora = resultado > 0 ? 'A' : 'B';
     sala.placarRodadas[equipeVencedora]++;
     sala.ultimoVencedorRodada = melhor[equipeVencedora].jogadorId;
-    console.log(`[TRUCO] Vencedor da rodada: ${equipeVencedora}. Placar: ${sala.placarRodadas.A}x${sala.placarRodadas.B}`);
+    console.log(`[TRUCO] Vencedor da rodada: ${equipeVencedora}. Placar de rodadas: ${sala.placarRodadas.A}x${sala.placarRodadas.B}`);
 
     io.to(salaId).emit('atualizarPlacarRodadas', { rodadasA: sala.placarRodadas.A, rodadasB: sala.placarRodadas.B });
 
@@ -121,14 +124,24 @@ function verificarFimRodada(salaId) {
     const pontosB = sala.placarRodadas.B;
     const rodadaAtual = sala.rodadaAtual;
 
+    // 🟢 LÓGICA DE FIM DE MÃO CORRIGIDA E CLARA
     if (pontosA >= 2 || pontosB >= 2) {
-        console.log(`[TRUCO] Mão finalizada por 2 pontos.`);
+        // Alguém já fez 2 pontos (ex: venceu a 1ª e a 2ª, ou 1ª empate + 2ª e 3ª vencidas)
+        console.log(`[TRUCO] Mão finalizada porque uma equipe atingiu 2 pontos.`);
         finalizarMao(salaId, equipeVencedora);
-    } else if (rodadaAtual === 2 && (pontosA === 1 || pontosB === 1) && sala.primeiraRodadaEmpatou) {
-        // 🟢 SÓ FINALIZA SE A PRIMEIRA RODADA FOI EMPATE
-        console.log(`[TRUCO] Mão finalizada após 1ª rodada empatada e 2ª com vencedor.`);
-        finalizarMao(salaId, equipeVencedora);
+    } else if (rodadaAtual === 2 && (pontosA === 1 || pontosB === 1)) {
+        // Estamos na segunda rodada e alguém tem 1 ponto
+        if (sala.primeiraRodadaEmpatou) {
+            // A primeira rodada empatou (0x0), então esta vitória encerra a mão
+            console.log(`[TRUCO] Mão finalizada: 1ª rodada empatou, 2ª rodada teve vencedor.`);
+            finalizarMao(salaId, equipeVencedora);
+        } else {
+            // A primeira rodada NÃO empatou (alguém venceu a 1ª), então o placar está 1x1 e deve ir para a 3ª rodada
+            console.log(`[TRUCO] Placar 1x1 após 2ª rodada sem empate inicial. Indo para 3ª rodada.`);
+            iniciarRodada(salaId);
+        }
     } else {
+        // Qualquer outro caso: continua jogando
         iniciarRodada(salaId);
     }
 }
@@ -178,7 +191,7 @@ function iniciarNovaMao(salaId) {
     sala.ultimoVencedorRodada = null;
     sala.ordemJogadores = sala.jogadores.map(j => j.id);
     sala.truco = { pendente: false, desafiante: null, desafiado: null, valorProposto: 3 };
-    sala.primeiraRodadaEmpatou = false;   // 🟢 reset da flag
+    sala.primeiraRodadaEmpatou = false;   // 🟢 RESET DA FLAG
     if (sala.jogadorQueIniciaProximaMao === undefined) sala.jogadorQueIniciaProximaMao = 0;
 
     sala.jogadores.forEach(j => {
@@ -193,7 +206,7 @@ function iniciarNovaMao(salaId) {
     io.to(salaId).emit('atualizarAposta', { aposta: 1 });
 }
 
-// ---------- TRUCO (mantido igual à última versão corrigida) ----------
+// ---------- TRUCO ----------
 function pedirTruco(salaId, socketId) {
     const sala = salas[salaId];
     if (!sala || sala.estado !== 'jogando') return;
@@ -234,7 +247,7 @@ function responderTruco(salaId, socketId, aceitou, aumentar) {
         io.to(salaId).emit('atualizarAposta', { aposta: sala.apostaAtual });
         adversarios.forEach(a => io.to(a.id).emit('trucoPedido', { valor: novo, de: jogador.nome }));
     } else {
-        // Correr: desafiante ganha o valor atual
+        // Correr
         sala.truco = { pendente: false, desafiante: null, desafiado: null, valorProposto: 0 };
         finalizarMao(salaId, desafiante);
     }
